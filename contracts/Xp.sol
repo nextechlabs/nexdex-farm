@@ -1,7 +1,8 @@
-pragma solidity 0.6.12;
+pragma solidity >=0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import '@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol';
+import "@thenexlabs/nex-lib/contracts/access/AccessControl.sol";
+import "@thenexlabs/nex-lib/contracts/token/ERC20/ERC20.sol";
 import "./interfaces/IXP.sol";
 
 struct LockInfo {
@@ -11,10 +12,12 @@ struct LockInfo {
 }
 
 // Xp with Governance & lock up.
-contract Xp is IXP, ERC20, AccessControl {
+contract Xp is IXP, ERC20, AccessControl, ReentrancyGuardUpgradeable {
 
-    constructor(uint unlockingStartDate_, uint unlockingEndDate_) ERC20('XP', '1XP') {
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+    constructor(uint unlockingStartDate_, uint unlockingEndDate_) ERC20('Experience Token', 'XP') {
+        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(MINTER_ROLE, msg.sender);
+        _grantRole(LOCK_ROLE, msg.sender);
         unlockingStartDate = unlockingStartDate_;
         unlockingEndDate = unlockingEndDate_;
     }
@@ -31,38 +34,36 @@ contract Xp is IXP, ERC20, AccessControl {
     function lockOf(address account) external view returns(uint) {
 
         return _lockInfos[account].locked;
-
     }
 
     function unlockableOf(address account) public view returns(uint unlockable) {
 
-        LockInfo storage lockInfo = _lockInfos[account];
-
         if(block.timestamp < unlockingStartDate) {
-            return 0;
+          return 0;
         }
 
-        uint timeSince = unlockingStartDate - block.timestamp;
+        LockInfo storage lockInfo = _lockInfos[account];
+
+        uint timeSince = block.timestamp - unlockingStartDate;
         uint totalLockTime = unlockingEndDate - unlockingStartDate;
         uint timeUnlocking = timeSince <= totalLockTime ? timeSince : totalLockTime;
 
-        unlockable = (((timeUnlocking * lockInfo.locked) / totalLockTime) + lockInfo.owed) - lockInfo.debt;
-
+        unlockable = ((timeUnlocking * lockInfo.locked) / totalLockTime);// + lockInfo.owed - lockInfo.debt;
     }
 
     function lock(address account, uint amount) external onlyRole(LOCK_ROLE) {
 
         _transfer(account, address(this), amount);
-        uint unlockableBefore = unlockableOf(account);
+        /* uint unlockableBefore = unlockableOf(account); */
 
         LockInfo storage lockInfo = _lockInfos[account];
         lockInfo.locked += amount;
 
-        uint unlockableAfter = unlockableOf(account);
+        /* uint unlockableAfter = unlockableOf(account);
 
         uint debt = unlockableAfter - unlockableBefore;
 
-        lockInfo.debt += debt;
+        lockInfo.debt += debt; */
 
     }
 
@@ -72,16 +73,16 @@ contract Xp is IXP, ERC20, AccessControl {
 
         require(amount <= unlockableBefore, "Cannot unlock this amount.");
 
-        uint targetUnlockable = unlockableBefore - amount;
+        /* uint targetUnlockable = unlockableBefore - amount; */
 
         LockInfo storage lockInfo = _lockInfos[msg.sender];
         lockInfo.locked -= amount;
 
-        uint unlockableAfter = unlockableOf(msg.sender);
+        /* uint unlockableAfter = unlockableOf(msg.sender);
 
         uint owed = targetUnlockable - unlockableAfter;
 
-        lockInfo.owed += owed;
+        lockInfo.owed += owed; */
 
         _transfer(address(this), msg.sender, amount);
 
@@ -103,7 +104,7 @@ contract Xp is IXP, ERC20, AccessControl {
 
     }
 
-    // Cake below
+    // Xp below
 
     /// @notice Creates `_amount` token to `_to`. Must only be called by the owner (MasterGamer).
     function mint(address _to, uint256 _amount) external onlyRole(MINTER_ROLE) {
@@ -213,9 +214,9 @@ contract Xp is IXP, ERC20, AccessControl {
         );
 
         address signatory = ecrecover(digest, v, r, s);
-        require(signatory != address(0), "CAKE::delegateBySig: invalid signature");
-        require(nonce == nonces[signatory]++, "CAKE::delegateBySig: invalid nonce");
-        require(now <= expiry, "CAKE::delegateBySig: signature expired");
+        require(signatory != address(0), "XP::delegateBySig: invalid signature");
+        require(nonce == nonces[signatory]++, "XP::delegateBySig: invalid nonce");
+        require(block.timestamp <= expiry, "XP::delegateBySig: signature expired");
         return _delegate(signatory, delegatee);
     }
 
@@ -245,7 +246,7 @@ contract Xp is IXP, ERC20, AccessControl {
         view
         returns (uint256)
     {
-        require(blockNumber < block.number, "CAKE::getPriorVotes: not yet determined");
+        require(blockNumber < block.number, "XP::getPriorVotes: not yet determined");
 
         uint32 nCheckpoints = numCheckpoints[account];
         if (nCheckpoints == 0) {
@@ -282,7 +283,7 @@ contract Xp is IXP, ERC20, AccessControl {
         internal
     {
         address currentDelegate = _delegates[delegator];
-        uint256 delegatorBalance = balanceOf(delegator); // balance of underlying CAKEs (not scaled);
+        uint256 delegatorBalance = balanceOf(delegator); // balance of underlying XPs (not scaled);
         _delegates[delegator] = delegatee;
 
         emit DelegateChanged(delegator, currentDelegate, delegatee);
@@ -296,7 +297,7 @@ contract Xp is IXP, ERC20, AccessControl {
                 // decrease old representative
                 uint32 srcRepNum = numCheckpoints[srcRep];
                 uint256 srcRepOld = srcRepNum > 0 ? checkpoints[srcRep][srcRepNum - 1].votes : 0;
-                uint256 srcRepNew = srcRepOld.sub(amount);
+                uint256 srcRepNew = srcRepOld - amount;
                 _writeCheckpoint(srcRep, srcRepNum, srcRepOld, srcRepNew);
             }
 
@@ -304,7 +305,7 @@ contract Xp is IXP, ERC20, AccessControl {
                 // increase new representative
                 uint32 dstRepNum = numCheckpoints[dstRep];
                 uint256 dstRepOld = dstRepNum > 0 ? checkpoints[dstRep][dstRepNum - 1].votes : 0;
-                uint256 dstRepNew = dstRepOld.add(amount);
+                uint256 dstRepNew = dstRepOld + amount;
                 _writeCheckpoint(dstRep, dstRepNum, dstRepOld, dstRepNew);
             }
         }
@@ -318,7 +319,7 @@ contract Xp is IXP, ERC20, AccessControl {
     )
         internal
     {
-        uint32 blockNumber = safe32(block.number, "CAKE::_writeCheckpoint: block number exceeds 32 bits");
+        uint32 blockNumber = safe32(block.number, "XP::_writeCheckpoint: block number exceeds 32 bits");
 
         if (nCheckpoints > 0 && checkpoints[delegatee][nCheckpoints - 1].fromBlock == blockNumber) {
             checkpoints[delegatee][nCheckpoints - 1].votes = newVotes;
@@ -335,9 +336,14 @@ contract Xp is IXP, ERC20, AccessControl {
         return uint32(n);
     }
 
-    function getChainId() internal pure returns (uint) {
+    function getChainId() internal view returns (uint) {
         uint256 chainId;
         assembly { chainId := chainid() }
         return chainId;
+    }
+
+    function transferOwnership(address newOwner) public override onlyRole(DEFAULT_ADMIN_ROLE){
+      _revokeRole(DEFAULT_ADMIN_ROLE, msg.sender);
+      _grantRole(DEFAULT_ADMIN_ROLE, newOwner);
     }
 }

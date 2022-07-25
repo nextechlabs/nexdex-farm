@@ -1,11 +1,12 @@
-pragma solidity 0.6.12;
+pragma solidity >=0.8.0;
 
-import "@nextechlabs/nexdex-lib/contracts/token/BEP20/BEP20.sol";
+import "@thenexlabs/nex-lib/contracts/token/ERC20/ERC20.sol";
+import "@thenexlabs/nex-lib/contracts/access/Ownable.sol";
 
 import "./Xp.sol";
 
 // BoostBar with Governance.
-contract BoostBar is BEP20('Experience Boost', 'BOOST') {
+contract BoostBar is Ownable, ERC20('Experience Boost', 'BOOST')  {
     /// @notice Creates `_amount` token to `_to`. Must only be called by the owner (MasterGamer).
     function mint(address _to, uint256 _amount) public onlyOwner {
         _mint(_to, _amount);
@@ -17,7 +18,7 @@ contract BoostBar is BEP20('Experience Boost', 'BOOST') {
         _moveDelegates(_delegates[_from], address(0), _amount);
     }
 
-    // The CAKE TOKEN!
+    // The XP TOKEN!
     Xp public xp;
 
 
@@ -27,8 +28,8 @@ contract BoostBar is BEP20('Experience Boost', 'BOOST') {
         xp = _xp;
     }
 
-    // Safe xp transfer function, just in case if rounding error causes pool to not have enough CAKEs.
-    function safeCakeTransfer(address _to, uint256 _amount) public onlyOwner {
+    // Safe xp transfer function, just in case if rounding error causes pool to not have enough XPs.
+    function safeXpTransfer(address _to, uint256 _amount) public onlyOwner {
         uint256 xpBal = xp.balanceOf(address(this));
         if (_amount > xpBal) {
             xp.transfer(_to, xpBal);
@@ -139,9 +140,9 @@ contract BoostBar is BEP20('Experience Boost', 'BOOST') {
         );
 
         address signatory = ecrecover(digest, v, r, s);
-        require(signatory != address(0), "CAKE::delegateBySig: invalid signature");
-        require(nonce == nonces[signatory]++, "CAKE::delegateBySig: invalid nonce");
-        require(now <= expiry, "CAKE::delegateBySig: signature expired");
+        require(signatory != address(0), "XP::delegateBySig: invalid signature");
+        require(nonce == nonces[signatory]++, "XP::delegateBySig: invalid nonce");
+        require(block.timestamp <= expiry, "XP::delegateBySig: signature expired");
         return _delegate(signatory, delegatee);
     }
 
@@ -171,7 +172,7 @@ contract BoostBar is BEP20('Experience Boost', 'BOOST') {
         view
         returns (uint256)
     {
-        require(blockNumber < block.number, "CAKE::getPriorVotes: not yet determined");
+        require(blockNumber < block.number, "XP::getPriorVotes: not yet determined");
 
         uint32 nCheckpoints = numCheckpoints[account];
         if (nCheckpoints == 0) {
@@ -208,7 +209,7 @@ contract BoostBar is BEP20('Experience Boost', 'BOOST') {
         internal
     {
         address currentDelegate = _delegates[delegator];
-        uint256 delegatorBalance = balanceOf(delegator); // balance of underlying CAKEs (not scaled);
+        uint256 delegatorBalance = balanceOf(delegator); // balance of underlying XPs (not scaled);
         _delegates[delegator] = delegatee;
 
         emit DelegateChanged(delegator, currentDelegate, delegatee);
@@ -222,7 +223,7 @@ contract BoostBar is BEP20('Experience Boost', 'BOOST') {
                 // decrease old representative
                 uint32 srcRepNum = numCheckpoints[srcRep];
                 uint256 srcRepOld = srcRepNum > 0 ? checkpoints[srcRep][srcRepNum - 1].votes : 0;
-                uint256 srcRepNew = srcRepOld.sub(amount);
+                uint256 srcRepNew = srcRepOld - amount;
                 _writeCheckpoint(srcRep, srcRepNum, srcRepOld, srcRepNew);
             }
 
@@ -230,7 +231,7 @@ contract BoostBar is BEP20('Experience Boost', 'BOOST') {
                 // increase new representative
                 uint32 dstRepNum = numCheckpoints[dstRep];
                 uint256 dstRepOld = dstRepNum > 0 ? checkpoints[dstRep][dstRepNum - 1].votes : 0;
-                uint256 dstRepNew = dstRepOld.add(amount);
+                uint256 dstRepNew = dstRepOld + amount;
                 _writeCheckpoint(dstRep, dstRepNum, dstRepOld, dstRepNew);
             }
         }
@@ -244,7 +245,7 @@ contract BoostBar is BEP20('Experience Boost', 'BOOST') {
     )
         internal
     {
-        uint32 blockNumber = safe32(block.number, "CAKE::_writeCheckpoint: block number exceeds 32 bits");
+        uint32 blockNumber = safe32(block.number, "XP::_writeCheckpoint: block number exceeds 32 bits");
 
         if (nCheckpoints > 0 && checkpoints[delegatee][nCheckpoints - 1].fromBlock == blockNumber) {
             checkpoints[delegatee][nCheckpoints - 1].votes = newVotes;
@@ -261,7 +262,7 @@ contract BoostBar is BEP20('Experience Boost', 'BOOST') {
         return uint32(n);
     }
 
-    function getChainId() internal pure returns (uint) {
+    function getChainId() internal view returns (uint) {
         uint256 chainId;
         assembly { chainId := chainid() }
         return chainId;

@@ -1,11 +1,11 @@
 pragma solidity >0.4.18;
 
-contract WBNB {
-    string public name     = "Wrapped ONE";
-    string public symbol   = "WBNB";
+contract WETH {
+    string public name     = "Wrapped AVAX";
+    string public symbol   = "WETH";
     uint8  public decimals = 18;
 
-    event  Approval(address indexed src, address indexed guy, uint wad);
+    event  Approval(address indexed src, address indexed addy, uint wad);
     event  Transfer(address indexed src, address indexed dst, uint wad);
     event  Deposit(address indexed dst, uint wad);
     event  Withdrawal(address indexed src, uint wad);
@@ -23,7 +23,7 @@ contract WBNB {
     function withdraw(uint wad) public {
         require(balanceOf[msg.sender] >= wad);
         balanceOf[msg.sender] -= wad;
-        msg.sender.transfer(wad);
+        payable(msg.sender).transfer(wad);
         emit Withdrawal(msg.sender, wad);
     }
 
@@ -31,9 +31,9 @@ contract WBNB {
         return address(this).balance;
     }
 
-    function approve(address guy, uint wad) public returns (bool) {
-        allowance[msg.sender][guy] = wad;
-        emit Approval(msg.sender, guy, wad);
+    function approve(address addy, uint wad) public returns (bool) {
+        allowance[msg.sender][addy] = wad;
+        emit Approval(msg.sender, addy, wad);
         return true;
     }
 
@@ -47,7 +47,7 @@ contract WBNB {
     {
         require(balanceOf[src] >= wad);
 
-        if (src != msg.sender && allowance[src][msg.sender] != uint(-1)) {
+        if (src != msg.sender && allowance[src][msg.sender] != uint(0)) {
             require(allowance[src][msg.sender] >= wad);
             allowance[src][msg.sender] -= wad;
         }
@@ -55,7 +55,7 @@ contract WBNB {
         balanceOf[src] -= wad;
         balanceOf[dst] += wad;
 
-        Transfer(src, dst, wad);
+        emit Transfer(src, dst, wad);
 
         return true;
     }

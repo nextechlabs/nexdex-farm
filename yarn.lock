@@ -434,9 +434,9 @@
     "@ethersproject/properties" "^5.0.3"
     "@ethersproject/strings" "^5.0.4"
 
-"@nextechlabs/nexdex-lib@^0.0.5":
+"@thenexlabs/nex-lib@^0.0.5":
   version "0.0.5"
-  resolved "https://npm.pkg.github.com/download/@nextechlabs/nexdex-lib/0.0.5/3a18ddc9c696ccd0fa0d419f2e1345d5e1f6cbb61762ad6818082f39c41dcc45#ea0ab18eb054687d219de2590ad0ed116ca4a81a"
+  resolved "https://npm.pkg.github.com/download/@thenexlabs/nex-lib/0.0.5/3a18ddc9c696ccd0fa0d419f2e1345d5e1f6cbb61762ad6818082f39c41dcc45#ea0ab18eb054687d219de2590ad0ed116ca4a81a"
   integrity sha512-uhxh7AidzZ40iEDYKrReIfB0Y3YW6YX4c/b78s5UbQIuudqZ+zSDKYyejkU/KBhGtNXrhCEWapVi9iTz9alINw==
 
 "@nodelib/fs.scandir@2.1.3":
