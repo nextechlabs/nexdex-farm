@@ -1,11 +1,11 @@
-pragma solidity >0.4.18;
+pragma solidity >=0.6.6;
 
-contract WETH {
+contract WAVAX {
     string public name     = "Wrapped AVAX";
-    string public symbol   = "WETH";
+    string public symbol   = "WAVAX";
     uint8  public decimals = 18;
 
-    event  Approval(address indexed src, address indexed addy, uint wad);
+    event  Approval(address indexed src, address indexed guy, uint wad);
     event  Transfer(address indexed src, address indexed dst, uint wad);
     event  Deposit(address indexed dst, uint wad);
     event  Withdrawal(address indexed src, uint wad);
@@ -13,7 +13,7 @@ contract WETH {
     mapping (address => uint)                       public  balanceOf;
     mapping (address => mapping (address => uint))  public  allowance;
 
-    function a() public payable {
+    receive() external payable {
         deposit();
     }
     function deposit() public payable {
@@ -23,7 +23,7 @@ contract WETH {
     function withdraw(uint wad) public {
         require(balanceOf[msg.sender] >= wad);
         balanceOf[msg.sender] -= wad;
-        payable(msg.sender).transfer(wad);
+        msg.sender.transfer(wad);
         emit Withdrawal(msg.sender, wad);
     }
 
@@ -31,9 +31,9 @@ contract WETH {
         return address(this).balance;
     }
 
-    function approve(address addy, uint wad) public returns (bool) {
-        allowance[msg.sender][addy] = wad;
-        emit Approval(msg.sender, addy, wad);
+    function approve(address guy, uint wad) public returns (bool) {
+        allowance[msg.sender][guy] = wad;
+        emit Approval(msg.sender, guy, wad);
         return true;
     }
 
@@ -42,12 +42,12 @@ contract WETH {
     }
 
     function transferFrom(address src, address dst, uint wad)
-    public
-    returns (bool)
+        public
+        returns (bool)
     {
         require(balanceOf[src] >= wad);
 
-        if (src != msg.sender && allowance[src][msg.sender] != uint(0)) {
+        if (src != msg.sender && allowance[src][msg.sender] != uint(-1)) {
             require(allowance[src][msg.sender] >= wad);
             allowance[src][msg.sender] -= wad;
         }

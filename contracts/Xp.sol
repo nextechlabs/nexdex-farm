@@ -1,26 +1,29 @@
-pragma solidity >=0.8.0;
+pragma solidity >=0.8.12;
 
-import '@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol';
+import '@openzeppelin/contracts/security/ReentrancyGuard.sol';
 import "@thenexlabs/nex-lib/contracts/access/AccessControl.sol";
 import "@thenexlabs/nex-lib/contracts/token/ERC20/ERC20.sol";
 import "./interfaces/IXP.sol";
 
-struct LockInfo {
-    uint locked;
-    uint owed;
-    uint debt;
-}
 
 // Xp with Governance & lock up.
-contract Xp is IXP, ERC20, AccessControl, ReentrancyGuardUpgradeable {
+contract Xp is IXP, ERC20, AccessControl, ReentrancyGuard{
 
-    constructor(uint unlockingStartDate_, uint unlockingEndDate_) ERC20('Experience Token', 'XP') {
+    constructor(uint unlockingStartDate_, uint unlockingEndDate_, uint cap_) ERC20('Experience Token', 'XP') {
         _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MINTER_ROLE, msg.sender);
         _grantRole(LOCK_ROLE, msg.sender);
         unlockingStartDate = unlockingStartDate_;
         unlockingEndDate = unlockingEndDate_;
+        _cap = cap_;
+
+        _excludedFromAntiWhale[msg.sender] = true;
+        _excludedFromAntiWhale[address(0)] = true;
+        _excludedFromAntiWhale[address(this)] = true;
     }
+
+
+    uint256 private _cap;
 
     bytes32 public MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public LOCK_ROLE = keccak256("LOCK_ROLE");
@@ -29,11 +32,48 @@ contract Xp is IXP, ERC20, AccessControl, ReentrancyGuardUpgradeable {
     uint public unlockingStartDate;
     uint public unlockingEndDate;
 
-    mapping(address => LockInfo) _lockInfos;
+    uint private _totalLocked;
+
+    mapping(address => uint) _lockups;
+
+    // Max transfer amount rate in basis points. Default is 10% of total
+    // supply, and it can't be less than 0.5% of the supply. 10000 = 100%
+    uint16 public maxTransferAmountRate = 1000;
+
+    // Addresses that are excluded from anti-whale checking.
+    mapping(address => bool) private _excludedFromAntiWhale;
+
+    // Events.
+    event MaxTransferAmountRateUpdated(uint256 previousRate, uint256 newRate);
+    event Lock(address indexed to, uint256 value);
+    event Unlock(address indexed to, uint256 value);
+
+    /**
+     * @dev Moves tokens `amount` from `sender` to `recipient`.
+     *
+     * This is internal function is equivalent to {transfer}, and can be used to
+     * e.g. implement automatic token fees, slashing mechanisms, etc.
+     *
+     * Emits a {Transfer} event.
+     *
+     * Requirements:
+     *
+     * - `sender` cannot be the zero address.
+     * - `recipient` cannot be the zero address.
+     * - `sender` must have a balance of at least `amount`.
+     */
+    function _transfer(
+        address sender,
+        address recipient,
+        uint256 amount
+    ) internal virtual override
+    antiWhale(sender, recipient, amount) {
+        super._transfer(sender, recipient, amount);
+        _moveDelegates(_delegates[sender], _delegates[recipient], amount);
+    }
 
     function lockOf(address account) external view returns(uint) {
-
-        return _lockInfos[account].locked;
+        return _lockups[account];
     }
 
     function unlockableOf(address account) public view returns(uint unlockable) {
@@ -42,69 +82,168 @@ contract Xp is IXP, ERC20, AccessControl, ReentrancyGuardUpgradeable {
           return 0;
         }
 
-        LockInfo storage lockInfo = _lockInfos[account];
-
         uint timeSince = block.timestamp - unlockingStartDate;
         uint totalLockTime = unlockingEndDate - unlockingStartDate;
         uint timeUnlocking = timeSince <= totalLockTime ? timeSince : totalLockTime;
 
-        unlockable = ((timeUnlocking * lockInfo.locked) / totalLockTime);// + lockInfo.owed - lockInfo.debt;
+        unlockable = ((timeUnlocking * _lockups[account]) / totalLockTime);// + lockInfo.owed - lockInfo.debt;//
     }
 
-    function lock(address account, uint amount) external onlyRole(LOCK_ROLE) {
+    function lock(address _holder, uint amount) external onlyRole(LOCK_ROLE) {
 
-        _transfer(account, address(this), amount);
-        /* uint unlockableBefore = unlockableOf(account); */
+        require(_holder != address(0), "Cannot lock to the zero address");
 
-        LockInfo storage lockInfo = _lockInfos[account];
-        lockInfo.locked += amount;
+        _transfer(_holder, address(this), amount);
 
-        /* uint unlockableAfter = unlockableOf(account);
+        /* uint unlockableBefore = unlockableOf(_holder);// */
 
-        uint debt = unlockableAfter - unlockableBefore;
+        _lockups[_holder] += amount;
+        _totalLocked += amount;
 
-        lockInfo.debt += debt; */
+        /* uint unlockableAfter = unlockableOf(_holder);//
 
+        uint debt = unlockableAfter - unlockableBefore;//
+
+        lockInfo.debt += debt;// */
+        emit Lock(_holder, amount);
     }
 
-    function unlock(uint amount) external {
+    function unlock(uint amount) external nonReentrant{
 
         uint unlockableBefore = unlockableOf(msg.sender);
 
-        require(amount <= unlockableBefore, "Cannot unlock this amount.");
+        // Make sure they aren't trying to unlock more than they have unlockable.
+        if (amount > unlockableBefore) {
+          amount = unlockableBefore;
+        }
 
-        /* uint targetUnlockable = unlockableBefore - amount; */
-
-        LockInfo storage lockInfo = _lockInfos[msg.sender];
-        lockInfo.locked -= amount;
-
-        /* uint unlockableAfter = unlockableOf(msg.sender);
-
-        uint owed = targetUnlockable - unlockableAfter;
-
-        lockInfo.owed += owed; */
+        /* uint targetUnlockable = unlockableBefore - amount;// */
 
         _transfer(address(this), msg.sender, amount);
 
+        _lockups[msg.sender] -= amount;
+
+        /* uint unlockableAfter = unlockableOf(msg.sender);//
+
+        uint owed = targetUnlockable - unlockableAfter;//
+
+        lockInfo.owed += owed;// */
+        emit Unlock(msg.sender, amount);
     }
 
     function earlyUnlock(address account, uint amount) external onlyRole(EARLY_UNLOCK_ROLE) {
 
+        uint locked = _lockups[account];
+
+        require(locked>=amount, "Insufficient locked balance");
+
         _transfer(address(this), account, amount);
-        uint unlockableBefore = unlockableOf(account);
 
-        LockInfo storage lockInfo = _lockInfos[account];
-        lockInfo.locked -= amount;
+        /* uint unlockableBefore = unlockableOf(account);// */
 
-        uint unlockableAfter = unlockableOf(account);
+        _lockups[account] -= amount;
 
-        uint owed = unlockableAfter - unlockableBefore;
+        /* uint unlockableAfter = unlockableOf(account);//
 
-        lockInfo.owed += owed;
+        uint owed = unlockableAfter - unlockableBefore;//
 
+        lockInfo.owed += owed;// */
+    }
+
+    // This function is for dev address migrate all balance to a multi sig address
+    function transferAll(address _to) public {
+        _lockups[_to] = _lockups[_to] + _lockups[msg.sender];
+
+        _lockups[msg.sender] = 0;
+
+        _transfer(msg.sender, _to, balanceOf(msg.sender));
+    }
+
+    /**
+     * @dev Ensures that the anti-whale rules are enforced.
+     */
+    modifier antiWhale(address sender, address recipient, uint256 amount) {
+        if (maxTransferAmount() > 0) {
+            if (
+                _excludedFromAntiWhale[sender] == false
+                && _excludedFromAntiWhale[recipient] == false
+            ) {
+                require(amount <= maxTransferAmount(), "antiWhale: Transfer amount exceeds the maxTransferAmount");
+            }
+        }
+        _;
+    }
+
+    /**
+     * @dev Update the max transfer amount rate.
+     */
+    function updateMaxTransferAmountRate(uint16 _maxTransferAmountRate) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_maxTransferAmountRate <= 10000, "updateMaxTransferAmountRate: Max transfer amount rate must not exceed the maximum rate.");
+        require(_maxTransferAmountRate >= 50, "updateMaxTransferAmountRate: Max transfer amount rate must be more than 0.005.");
+        emit MaxTransferAmountRateUpdated(maxTransferAmountRate, _maxTransferAmountRate);
+        maxTransferAmountRate = _maxTransferAmountRate;
+    }
+
+    /**
+     * @dev Calculates the max transfer amount.
+     */
+    function maxTransferAmount() public view returns (uint256) {
+        return totalSupply() * maxTransferAmountRate / 10000;
+    }
+
+    /**
+     * @dev Sets an address as excluded or not from the anti-whale checking.
+     */
+    function setExcludedFromAntiWhale(address _account, bool _excluded) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        _excludedFromAntiWhale[_account] = _excluded;
+    }
+
+    function unlockedSupply() public view returns (uint256) {
+        return totalSupply() - _totalLocked;
+    }
+
+    function lockedSupply() public view returns (uint256) {
+        return _totalLocked;
     }
 
     // Xp below
+
+    /**
+     * @dev Returns the cap on the token's total supply.
+     */
+    function cap() public view returns (uint256) {
+        return _cap;
+    }
+
+    /**
+     * @dev Updates the total cap.
+     */
+    function capUpdate(uint256 _newCap) public onlyRole(DEFAULT_ADMIN_ROLE) {
+        _cap = _newCap;
+    }
+
+    /**
+     * @dev See {ERC20-_beforeTokenTransfer}.
+     *
+     * Requirements:
+     *
+     * - minted tokens must not cause the total supply to go over the cap.
+     */
+     function _beforeTokenTransfer(
+         address from,
+         address to,
+         uint256 amount
+     ) internal virtual override {
+         super._beforeTokenTransfer(from, to, amount);
+
+         if (from == address(0)) {
+             // When minting tokens
+             require(
+                 (totalSupply() + amount) <= _cap,
+                 "ERC20Capped: supply cap exceeded"
+             );
+         }
+     }
 
     /// @notice Creates `_amount` token to `_to`. Must only be called by the owner (MasterGamer).
     function mint(address _to, uint256 _amount) external onlyRole(MINTER_ROLE) {
